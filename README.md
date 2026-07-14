@@ -1,5 +1,7 @@
 # Product Analytics Platform for SaaS Customer Intelligence
 
+**Live Dashboard Demo**: [appuct-analytics-dashboard.streamlit.app](https://appuct-analytics-dashboard-paqnfvloeexujyzyeh7zbt.streamlit.app)
+
 Designed and analyzed a normalized relational database (3NF) containing users, subscriptions, transactions, feature usage, and support interactions to derive product KPIs, build interactive dashboards, and generate data-driven recommendations for improving user retention and engagement.
 
 ---

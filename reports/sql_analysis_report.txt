@@ -1,0 +1,1344 @@
+=========================================================================
+SaaS Product Analytics Platform - SQL Query Audit Report
+Executed on: 2026-07-14 21:43:56.092246
+=========================================================================
+
+--- Query 1: SQL Execution ---
+SQL:
+SELECT 
+    funnel_stage,
+    COUNT(user_id) AS user_count,
+    ROUND(COUNT(user_id) * 100.0 / (SELECT COUNT(*) FROM users), 2) AS percentage
+FROM users
+GROUP BY funnel_stage
+ORDER BY user_count DESC;
+
+Results:
+      funnel_stage  user_count  percentage
+  Feature Adoption        1263       42.10
+      Subscription         823       27.43
+           Renewal         594       19.80
+       First Login         128        4.27
+Email Verification         104        3.47
+            Signup          88        2.93
+
+=========================================================================
+
+--- Query 2: SQL Execution ---
+SQL:
+SELECT 
+    DATE_FORMAT(session_date, '%Y-%m') AS session_month, 
+    COUNT(DISTINCT user_id) AS mau
+FROM user_sessions
+GROUP BY session_month
+ORDER BY session_month;
+
+Results:
+session_month  mau
+      2025-07  221
+      2025-08  475
+      2025-09  659
+      2025-10  798
+      2025-11  955
+      2025-12 1107
+      2026-01 1278
+      2026-02 1394
+      2026-03 1598
+      2026-04 1761
+      2026-05 1712
+      2026-06 1622
+
+=========================================================================
+
+--- Query 3: SQL Execution ---
+SQL:
+SELECT 
+    session_date,
+    COUNT(DISTINCT user_id) AS dau
+FROM user_sessions
+WHERE session_date BETWEEN '2026-06-17' AND '2026-06-30'
+GROUP BY session_date
+ORDER BY session_date;
+
+Results:
+session_date  dau
+  2026-06-17  237
+  2026-06-18  238
+  2026-06-19  251
+  2026-06-20  253
+  2026-06-21  251
+  2026-06-22  233
+  2026-06-23  246
+  2026-06-24  236
+  2026-06-25  255
+  2026-06-26  231
+  2026-06-27  240
+  2026-06-28  250
+  2026-06-29  239
+  2026-06-30  222
+
+=========================================================================
+
+--- Query 4: SQL Execution ---
+SQL:
+WITH MonthlyActive AS (
+    SELECT COUNT(DISTINCT user_id) AS mau_val
+    FROM user_sessions
+    WHERE session_date BETWEEN '2026-06-01' AND '2026-06-30'
+),
+DailyActive AS (
+    SELECT session_date, COUNT(DISTINCT user_id) AS dau_val
+    FROM user_sessions
+    WHERE session_date BETWEEN '2026-06-01' AND '2026-06-30'
+    GROUP BY session_date
+)
+SELECT 
+    ROUND(AVG(da.dau_val), 1) AS avg_daily_active_users,
+    (SELECT mau_val FROM MonthlyActive) AS monthly_active_users,
+    ROUND(AVG(da.dau_val) * 100.0 / (SELECT mau_val FROM MonthlyActive), 2) AS stickiness_percentage
+FROM DailyActive da;
+
+Results:
+ avg_daily_active_users  monthly_active_users  stickiness_percentage
+                  247.5                  1622                  15.26
+
+=========================================================================
+
+--- Query 5: SQL Execution ---
+SQL:
+SELECT 
+    DATE_FORMAT(transaction_date, '%Y-%m') AS billing_month,
+    SUM(amount) AS monthly_revenue,
+    COUNT(transaction_id) AS transaction_count
+FROM transactions
+WHERE status = 'Success'
+GROUP BY billing_month
+ORDER BY billing_month;
+
+Results:
+billing_month  monthly_revenue  transaction_count
+      2025-07           9160.0                140
+      2025-08          13201.0                209
+      2025-09          16036.0                254
+      2025-10          19870.0                310
+      2025-11          21399.0                351
+      2025-12          25776.0                414
+      2026-01          30219.0                491
+      2026-02          30260.0                510
+      2026-03          38886.0                614
+      2026-04          41547.0                653
+      2026-05          35922.0                588
+      2026-06          35201.0                569
+
+=========================================================================
+
+--- Query 6: SQL Execution ---
+SQL:
+SELECT 
+    s.plan_type,
+    SUM(t.amount) AS total_revenue,
+    COUNT(DISTINCT us.user_id) AS active_users,
+    ROUND(SUM(t.amount) / COUNT(DISTINCT us.user_id), 2) AS arpu
+FROM subscriptions s
+JOIN user_sessions us ON s.user_id = us.user_id
+LEFT JOIN transactions t ON s.user_id = t.user_id 
+    AND DATE_FORMAT(t.transaction_date, '%Y-%m') = '2026-06'
+    AND t.status = 'Success'
+WHERE us.session_date BETWEEN '2026-06-01' AND '2026-06-30'
+GROUP BY s.plan_type;
+
+Results:
+ plan_type  total_revenue  active_users   arpu
+Enterprise       100495.0           255 394.10
+      Free            NaN           217    NaN
+       Pro        60871.0          1150  52.93
+
+=========================================================================
+
+--- Query 7: SQL Execution ---
+SQL:
+WITH MonthKPIs AS (
+    SELECT 
+        s.plan_type,
+        COUNT(DISTINCT s.user_id) AS total_customers,
+        SUM(CASE WHEN s.status = 'Churned' THEN 1 ELSE 0 END) AS churned_customers,
+        SUM(CASE WHEN t.status = 'Success' AND t.transaction_date BETWEEN '2026-06-01' AND '2026-06-30' THEN t.amount ELSE 0 END) AS revenue
+    FROM subscriptions s
+    LEFT JOIN transactions t ON s.user_id = t.user_id
+    GROUP BY s.plan_type
+)
+SELECT 
+    plan_type,
+    ROUND(revenue / total_customers, 2) AS monthly_arpu,
+    ROUND(churned_customers * 100.0 / total_customers, 2) AS monthly_churn_rate_pct,
+    ROUND((revenue / total_customers) / NULLIF(churned_customers / total_customers, 0), 2) AS clv_estimate
+FROM MonthKPIs
+WHERE plan_type <> 'Free';
+
+Results:
+ plan_type  monthly_arpu  monthly_churn_rate_pct clv_estimate
+Enterprise         84.84                     0.0         None
+       Pro         11.48                     0.0         None
+
+=========================================================================
+
+--- Query 8: SQL Execution ---
+SQL:
+WITH TotalTx AS (
+    SELECT 
+        s.plan_type,
+        COUNT(*) AS total_tx_count
+    FROM transactions t
+    JOIN subscriptions s ON t.user_id = s.user_id
+    GROUP BY s.plan_type
+)
+SELECT 
+    s.plan_type,
+    COUNT(t.transaction_id) AS failed_billing_attempts,
+    SUM(t.amount) AS leaked_revenue_potential,
+    ROUND(COUNT(t.transaction_id) * 100.0 / tot.total_tx_count, 2) AS failure_percentage
+FROM transactions t
+JOIN subscriptions s ON t.user_id = s.user_id
+JOIN TotalTx tot ON s.plan_type = tot.plan_type
+WHERE t.status = 'Failed'
+GROUP BY s.plan_type, tot.total_tx_count;
+
+Results:
+ plan_type  failed_billing_attempts  leaked_revenue_potential  failure_percentage
+       Pro                      212                    6148.0                4.91
+Enterprise                       64                   12736.0                6.03
+
+=========================================================================
+
+--- Query 9: SQL Execution ---
+SQL:
+SELECT 
+    funnel_stage,
+    COUNT(*) AS users_reached
+FROM users
+GROUP BY funnel_stage
+ORDER BY 
+    CASE funnel_stage
+        WHEN 'Signup' THEN 1
+        WHEN 'Email Verification' THEN 2
+        WHEN 'First Login' THEN 3
+        WHEN 'Feature Adoption' THEN 4
+        WHEN 'Subscription' THEN 5
+        WHEN 'Renewal' THEN 6
+        ELSE 7
+    END;
+
+Results:
+      funnel_stage  users_reached
+            Signup             88
+Email Verification            104
+       First Login            128
+  Feature Adoption           1263
+      Subscription            823
+           Renewal            594
+
+=========================================================================
+
+--- Query 10: SQL Execution ---
+SQL:
+WITH FunnelStages AS (
+    SELECT
+        COUNT(CASE WHEN funnel_stage IN ('Signup', 'Email Verification', 'First Login', 'Feature Adoption', 'Subscription', 'Renewal') THEN 1 END) AS signup_total,
+        COUNT(CASE WHEN funnel_stage IN ('First Login', 'Feature Adoption', 'Subscription', 'Renewal') THEN 1 END) AS login_total,
+        COUNT(CASE WHEN funnel_stage IN ('Subscription', 'Renewal') THEN 1 END) AS paid_total,
+        COUNT(CASE WHEN funnel_stage = 'Renewal' THEN 1 END) AS renewal_total
+    FROM users
+)
+SELECT 
+    signup_total AS total_signups,
+    ROUND(login_total * 100.0 / signup_total, 2) AS signup_to_login_conv_pct,
+    ROUND(paid_total * 100.0 / login_total, 2) AS login_to_paid_conv_pct,
+    ROUND(renewal_total * 100.0 / paid_total, 2) AS paid_to_renewal_conv_pct
+FROM FunnelStages;
+
+Results:
+ total_signups  signup_to_login_conv_pct  login_to_paid_conv_pct  paid_to_renewal_conv_pct
+          3000                      93.6                   50.46                     41.92
+
+=========================================================================
+
+--- Query 11: SQL Execution ---
+SQL:
+SELECT 
+    u.experiment_group,
+    COUNT(u.user_id) AS total_users,
+    SUM(CASE WHEN u.funnel_stage IN ('Subscription', 'Renewal') THEN 1 ELSE 0 END) AS converted_users,
+    ROUND(SUM(CASE WHEN u.funnel_stage IN ('Subscription', 'Renewal') THEN 1 ELSE 0 END) * 100.0 / COUNT(u.user_id), 2) AS conversion_rate_pct
+FROM users u
+GROUP BY u.experiment_group;
+
+Results:
+experiment_group  total_users  converted_users  conversion_rate_pct
+               B         1501            890.0                59.29
+               A         1499            527.0                35.16
+
+=========================================================================
+
+--- Query 12: SQL Execution ---
+SQL:
+SELECT 
+    u.experiment_group,
+    ROUND(SUM(t.amount) / COUNT(DISTINCT u.user_id), 2) AS lifetime_arpu
+FROM users u
+LEFT JOIN transactions t ON u.user_id = t.user_id AND t.status = 'Success'
+GROUP BY u.experiment_group;
+
+Results:
+experiment_group  lifetime_arpu
+               A          76.12
+               B         135.49
+
+=========================================================================
+
+--- Query 13: SQL Execution ---
+SQL:
+SELECT 
+    u.experiment_group,
+    ROUND(AVG(us.session_duration_minutes), 1) AS avg_session_minutes,
+    COUNT(us.session_id) AS total_sessions
+FROM users u
+JOIN user_sessions us ON u.user_id = us.user_id
+GROUP BY u.experiment_group;
+
+Results:
+experiment_group  avg_session_minutes  total_sessions
+               B                 31.0           37967
+               A                 25.1           19956
+
+=========================================================================
+
+--- Query 14: SQL Execution ---
+SQL:
+SELECT 
+    u.experiment_group,
+    ROUND(COUNT(fe.event_id) / COUNT(DISTINCT u.user_id), 1) AS avg_clicks_per_user
+FROM users u
+LEFT JOIN feature_events fe ON u.user_id = fe.user_id
+GROUP BY u.experiment_group;
+
+Results:
+experiment_group  avg_clicks_per_user
+               A                  7.7
+               B                 14.8
+
+=========================================================================
+
+--- Query 15: SQL Execution ---
+SQL:
+SELECT 
+    u.signup_channel,
+    COUNT(u.user_id) AS total_users,
+    SUM(CASE WHEN s.status = 'Churned' THEN 1 ELSE 0 END) AS churned_users,
+    ROUND(SUM(CASE WHEN s.status = 'Churned' THEN 1 ELSE 0 END) * 100.0 / COUNT(u.user_id), 2) AS churn_rate_pct
+FROM users u
+JOIN subscriptions s ON u.user_id = s.user_id
+GROUP BY u.signup_channel
+ORDER BY churn_rate_pct;
+
+Results:
+signup_channel  total_users  churned_users  churn_rate_pct
+      LinkedIn          596          264.0           44.30
+    Google Ads          731          328.0           44.87
+Email Campaign          232          105.0           45.26
+Organic Search         1105          501.0           45.34
+      Referral          336          154.0           45.83
+
+=========================================================================
+
+--- Query 16: SQL Execution ---
+SQL:
+SELECT 
+    s.plan_type,
+    COUNT(u.user_id) AS total_users,
+    SUM(CASE WHEN s.status = 'Churned' THEN 1 ELSE 0 END) AS churned_users,
+    ROUND(SUM(CASE WHEN s.status = 'Churned' THEN 1 ELSE 0 END) * 100.0 / COUNT(u.user_id), 2) AS churn_rate_pct
+FROM users u
+JOIN subscriptions s ON u.user_id = s.user_id
+GROUP BY s.plan_type;
+
+Results:
+ plan_type  total_users  churned_users  churn_rate_pct
+      Free         1583         1352.0           85.41
+       Pro         1159            0.0            0.00
+Enterprise          258            0.0            0.00
+
+=========================================================================
+
+--- Query 17: SQL Execution ---
+SQL:
+SELECT 
+    u.country,
+    COUNT(DISTINCT u.user_id) AS customer_count,
+    SUM(t.amount) AS total_revenue,
+    ROUND(SUM(t.amount) / COUNT(DISTINCT u.user_id), 2) AS revenue_per_customer
+FROM users u
+LEFT JOIN transactions t ON u.user_id = t.user_id AND t.status = 'Success'
+GROUP BY u.country
+ORDER BY total_revenue DESC;
+
+Results:
+       country  customer_count  total_revenue  revenue_per_customer
+ United States            1201       116012.0                 96.60
+United Kingdom             442        51943.0                117.52
+         India             455        45034.0                 98.98
+       Germany             316        39328.0                124.46
+        Canada             287        26136.0                 91.07
+        France             158        25596.0                162.00
+     Australia             141        13428.0                 95.23
+
+=========================================================================
+
+--- Query 18: SQL Execution ---
+SQL:
+SELECT 
+    DATE_FORMAT(signup_date, '%Y-%m') AS cohort_month,
+    COUNT(user_id) AS size
+FROM users
+GROUP BY cohort_month
+ORDER BY cohort_month;
+
+Results:
+cohort_month  size
+     2025-07   296
+     2025-08   325
+     2025-09   307
+     2025-10   272
+     2025-11   287
+     2025-12   262
+     2026-01   317
+     2026-02   278
+     2026-03   316
+     2026-04   334
+     2026-05     6
+
+=========================================================================
+
+--- Query 19: SQL Execution ---
+SQL:
+SELECT 
+    feature_name,
+    COUNT(*) AS total_clicks,
+    ROUND(AVG(time_spent_seconds), 1) AS avg_duration_seconds,
+    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM feature_events), 2) AS usage_share_pct
+FROM feature_events
+GROUP BY feature_name
+ORDER BY total_clicks DESC;
+
+Results:
+feature_name  total_clicks  avg_duration_seconds  usage_share_pct
+      Export          8309                  62.4            24.61
+Integrations          6203                  62.6            18.37
+     Reports          5745                  62.4            17.01
+      Search          4729                  62.2            14.00
+   Dashboard          4692                  62.6            13.89
+    Settings          4090                  63.5            12.11
+
+=========================================================================
+
+--- Query 20: SQL Execution ---
+SQL:
+SELECT 
+    fe.feature_name,
+    COUNT(*) AS enterprise_clicks,
+    ROUND(AVG(fe.time_spent_seconds), 1) AS avg_duration_seconds
+FROM feature_events fe
+JOIN subscriptions s ON fe.user_id = s.user_id
+WHERE s.plan_type = 'Enterprise'
+GROUP BY fe.feature_name
+ORDER BY enterprise_clicks DESC;
+
+Results:
+feature_name  enterprise_clicks  avg_duration_seconds
+      Export               1508                  62.3
+Integrations               1057                  62.7
+     Reports                981                  61.9
+      Search                511                  63.9
+   Dashboard                488                  60.4
+    Settings                483                  61.4
+
+=========================================================================
+
+--- Query 21: SQL Execution ---
+SQL:
+SELECT 
+    s.plan_type,
+    SUM(CASE WHEN fe.feature_name = 'Export' THEN 1 ELSE 0 END) AS total_export_clicks,
+    ROUND(SUM(CASE WHEN fe.feature_name = 'Export' THEN 1 ELSE 0 END) / COUNT(DISTINCT s.user_id), 2) AS avg_export_clicks_per_user
+FROM subscriptions s
+LEFT JOIN feature_events fe ON s.user_id = fe.user_id
+GROUP BY s.plan_type;
+
+Results:
+ plan_type  total_export_clicks  avg_export_clicks_per_user
+Enterprise               1508.0                        5.84
+      Free                344.0                        0.22
+       Pro               6457.0                        5.57
+
+=========================================================================
+
+--- Query 22: SQL Execution ---
+SQL:
+SELECT 
+    category,
+    COUNT(*) AS ticket_volume,
+    ROUND(AVG(resolution_time_hours), 2) AS avg_resolution_hours,
+    ROUND(AVG(satisfaction_score), 1) AS avg_csat_score
+FROM support_tickets
+GROUP BY category
+ORDER BY ticket_volume DESC;
+
+Results:
+      category  ticket_volume  avg_resolution_hours  avg_csat_score
+       Billing            474                 25.03             2.9
+       Account            474                 25.97             2.8
+     Technical            469                 25.15             2.9
+FeatureRequest            459                 25.30             2.8
+
+=========================================================================
+
+--- Query 23: SQL Execution ---
+SQL:
+SELECT 
+    s.plan_type,
+    COUNT(st.ticket_id) AS ticket_count,
+    ROUND(AVG(st.satisfaction_score), 2) AS avg_satisfaction_rating
+FROM support_tickets st
+JOIN subscriptions s ON st.user_id = s.user_id
+WHERE st.satisfaction_score IS NOT NULL
+GROUP BY s.plan_type;
+
+Results:
+ plan_type  ticket_count  avg_satisfaction_rating
+      Free          1489                     2.61
+       Pro           308                     3.82
+Enterprise            79                     3.77
+
+=========================================================================
+
+--- Query 24: SQL Execution ---
+SQL:
+WITH TicketCounts AS (
+    SELECT 
+        u.user_id,
+        s.status AS customer_status,
+        COUNT(st.ticket_id) AS tickets_count
+    FROM users u
+    JOIN subscriptions s ON u.user_id = s.user_id
+    LEFT JOIN support_tickets st ON u.user_id = st.user_id
+    GROUP BY u.user_id, customer_status
+)
+SELECT 
+    CASE 
+        WHEN tickets_count = 0 THEN '0 Tickets'
+        WHEN tickets_count BETWEEN 1 AND 2 THEN '1-2 Tickets'
+        WHEN tickets_count BETWEEN 3 AND 4 THEN '3-4 Tickets'
+        ELSE '5+ Tickets (Friction)'
+    END AS ticket_segment,
+    COUNT(user_id) AS customers,
+    SUM(CASE WHEN customer_status = 'Churned' THEN 1 ELSE 0 END) AS churned_count,
+    ROUND(SUM(CASE WHEN customer_status = 'Churned' THEN 1 ELSE 0 END) * 100.0 / COUNT(user_id), 2) AS churn_rate_pct
+FROM TicketCounts
+GROUP BY ticket_segment
+ORDER BY ticket_segment;
+
+Results:
+ticket_segment  customers  churned_count  churn_rate_pct
+     0 Tickets       2227          869.0           39.02
+   1-2 Tickets        454          164.0           36.12
+   3-4 Tickets        319          319.0          100.00
+
+=========================================================================
+
+--- Query 25: SQL Execution ---
+SQL:
+SELECT 
+    s.plan_type,
+    COUNT(st.ticket_id) AS total_tickets,
+    SUM(CASE WHEN st.resolution_time_hours <= 24.0 THEN 1 ELSE 0 END) AS resolved_under_24h,
+    ROUND(SUM(CASE WHEN st.resolution_time_hours <= 24.0 THEN 1 ELSE 0 END) * 100.0 / COUNT(st.ticket_id), 2) AS sla_compliance_pct
+FROM support_tickets st
+JOIN subscriptions s ON st.user_id = s.user_id
+GROUP BY s.plan_type;
+
+Results:
+ plan_type  total_tickets  resolved_under_24h  sla_compliance_pct
+      Free           1489               648.0               43.52
+       Pro            308               260.0               84.42
+Enterprise             79                73.0               92.41
+
+=========================================================================
+
+--- Query 26: SQL Execution ---
+SQL:
+SELECT 
+    s.status AS subscription_status,
+    ROUND(AVG(us.session_duration_minutes), 1) AS avg_session_minutes,
+    ROUND(MIN(us.session_duration_minutes), 1) AS min_session_minutes,
+    ROUND(MAX(us.session_duration_minutes), 1) AS max_session_minutes
+FROM user_sessions us
+JOIN subscriptions s ON us.user_id = s.user_id
+GROUP BY s.status;
+
+Results:
+subscription_status  avg_session_minutes  min_session_minutes  max_session_minutes
+            Churned                 28.0                    2                   55
+             Active                 28.9                    2                   55
+            Expired                 29.2                    5                   55
+
+=========================================================================
+
+--- Query 27: SQL Execution ---
+SQL:
+WITH RankedSessions AS (
+    SELECT 
+        u.user_id,
+        u.signup_channel,
+        us.session_date,
+        us.session_duration_minutes,
+        DENSE_RANK() OVER (PARTITION BY u.signup_channel ORDER BY us.session_duration_minutes DESC) AS session_rank
+    FROM users u
+    JOIN user_sessions us ON u.user_id = us.user_id
+)
+SELECT 
+    signup_channel,
+    user_id,
+    session_date,
+    session_duration_minutes,
+    session_rank
+FROM RankedSessions
+WHERE session_rank <= 3
+ORDER BY signup_channel, session_rank;
+
+Results:
+signup_channel  user_id session_date  session_duration_minutes  session_rank
+Email Campaign     2522   2026-02-09                        55             1
+Email Campaign      747   2026-05-31                        55             1
+Email Campaign       40   2026-02-07                        55             1
+Email Campaign     2453   2025-11-28                        55             1
+Email Campaign     1438   2026-05-06                        55             1
+Email Campaign     1893   2025-11-01                        55             1
+Email Campaign     1872   2026-04-23                        54             2
+Email Campaign     1807   2026-03-07                        54             2
+Email Campaign     2403   2026-05-19                        54             2
+Email Campaign     2422   2026-03-21                        54             2
+Email Campaign     1312   2026-01-30                        54             2
+Email Campaign     1370   2026-02-21                        54             2
+Email Campaign     2056   2026-04-25                        54             2
+Email Campaign     1481   2026-05-26                        54             2
+Email Campaign     2564   2026-05-19                        54             2
+Email Campaign     2718   2025-10-29                        54             2
+Email Campaign     2651   2025-11-29                        54             2
+Email Campaign     2688   2026-05-17                        54             2
+Email Campaign       38   2026-01-13                        54             2
+Email Campaign       38   2025-10-06                        54             2
+Email Campaign      646   2026-05-11                        54             2
+Email Campaign     1053   2026-06-16                        54             2
+Email Campaign      510   2026-05-19                        54             2
+Email Campaign      383   2026-03-10                        54             2
+Email Campaign      479   2026-02-09                        53             3
+Email Campaign      510   2026-06-02                        53             3
+Email Campaign      469   2025-10-20                        53             3
+Email Campaign      110   2026-04-25                        53             3
+Email Campaign      150   2026-01-19                        53             3
+Email Campaign      145   2026-04-19                        53             3
+Email Campaign      747   2026-06-15                        53             3
+Email Campaign      646   2025-10-12                        53             3
+Email Campaign      600   2026-02-15                        53             3
+Email Campaign      627   2026-01-15                        53             3
+Email Campaign     1157   2026-03-12                        53             3
+Email Campaign     1157   2026-03-27                        53             3
+Email Campaign     1105   2026-02-16                        53             3
+Email Campaign     1104   2026-02-19                        53             3
+Email Campaign     1312   2026-05-23                        53             3
+Email Campaign     1807   2026-03-10                        53             3
+Email Campaign     1830   2026-04-03                        53             3
+Email Campaign     1807   2026-02-03                        53             3
+Email Campaign     1830   2026-06-04                        53             3
+Email Campaign     1905   2026-06-05                        53             3
+Email Campaign     2056   2026-01-03                        53             3
+Email Campaign     1608   2025-10-13                        53             3
+Email Campaign     1661   2026-02-11                        53             3
+Email Campaign     2213   2026-01-27                        53             3
+Email Campaign     2651   2025-11-26                        53             3
+Email Campaign     2793   2026-02-07                        53             3
+Email Campaign     2718   2026-05-23                        53             3
+Email Campaign     2564   2026-02-19                        53             3
+Email Campaign     2522   2026-06-19                        53             3
+    Google Ads     1882   2026-01-24                        55             1
+    Google Ads     1766   2025-12-11                        55             1
+    Google Ads     1843   2026-01-26                        55             1
+    Google Ads     1923   2026-05-21                        55             1
+    Google Ads     1269   2026-02-09                        55             1
+    Google Ads     2326   2026-06-06                        55             1
+    Google Ads     1479   2025-09-27                        55             1
+    Google Ads     1992   2025-11-21                        55             1
+    Google Ads     1595   2026-06-11                        55             1
+    Google Ads     1742   2026-03-12                        55             1
+    Google Ads     2976   2026-05-19                        55             1
+    Google Ads     2495   2026-04-16                        55             1
+    Google Ads     2775   2026-04-19                        55             1
+    Google Ads     2740   2026-05-30                        55             1
+    Google Ads      444   2026-05-28                        55             1
+    Google Ads      927   2026-05-10                        55             1
+    Google Ads     1008   2026-06-06                        55             1
+    Google Ads     1191   2025-12-14                        55             1
+    Google Ads     1238   2025-12-20                        55             1
+    Google Ads      762   2026-01-13                        55             1
+    Google Ads      347   2026-04-30                        55             1
+    Google Ads      545   2026-02-03                        55             1
+    Google Ads       29   2026-06-04                        55             1
+    Google Ads      203   2026-05-26                        55             1
+    Google Ads      203   2026-05-31                        55             1
+    Google Ads      159   2025-12-12                        55             1
+    Google Ads       93   2026-06-22                        54             2
+    Google Ads      159   2025-11-02                        54             2
+    Google Ads      199   2026-04-06                        54             2
+    Google Ads     1208   2026-05-23                        54             2
+    Google Ads     1119   2025-08-10                        54             2
+    Google Ads     1219   2026-04-05                        54             2
+    Google Ads      508   2026-01-08                        54             2
+    Google Ads      525   2026-02-28                        54             2
+    Google Ads      447   2026-06-30                        54             2
+    Google Ads      464   2026-06-17                        54             2
+    Google Ads      508   2026-05-11                        54             2
+    Google Ads      927   2026-01-26                        54             2
+    Google Ads      960   2026-03-12                        54             2
+    Google Ads      699   2026-05-30                        54             2
+    Google Ads      645   2026-01-09                        54             2
+    Google Ads      761   2026-03-09                        54             2
+    Google Ads      712   2026-03-09                        54             2
+    Google Ads      859   2025-10-08                        54             2
+    Google Ads      789   2026-06-13                        54             2
+    Google Ads      762   2026-05-27                        54             2
+    Google Ads      712   2026-03-14                        54             2
+    Google Ads      290   2026-03-17                        54             2
+    Google Ads      290   2026-04-28                        54             2
+    Google Ads     1334   2026-02-23                        54             2
+    Google Ads     1319   2026-02-22                        54             2
+    Google Ads     1283   2025-12-09                        54             2
+    Google Ads     1765   2026-05-31                        54             2
+    Google Ads     1774   2025-10-21                        54             2
+    Google Ads     1897   2026-03-06                        54             2
+    Google Ads     2151   2026-04-18                        54             2
+    Google Ads     1998   2025-12-25                        54             2
+    Google Ads     1992   2025-11-30                        54             2
+    Google Ads     2386   2026-02-12                        54             2
+    Google Ads     2451   2025-10-17                        54             2
+    Google Ads     1500   2026-05-25                        54             2
+    Google Ads     1595   2025-11-08                        54             2
+    Google Ads     1595   2025-11-25                        54             2
+    Google Ads     1572   2026-04-11                        54             2
+    Google Ads     2778   2026-03-25                        54             2
+    Google Ads     2936   2026-06-23                        54             2
+    Google Ads     2936   2025-07-05                        54             2
+    Google Ads     2936   2025-07-28                        54             2
+    Google Ads     2894   2026-04-01                        54             2
+    Google Ads     2618   2026-04-20                        54             2
+    Google Ads     2552   2026-01-09                        54             2
+    Google Ads     2618   2026-02-10                        54             2
+    Google Ads     2545   2025-10-23                        54             2
+    Google Ads     2552   2026-05-27                        53             3
+    Google Ads     2590   2025-10-07                        53             3
+    Google Ads     2545   2026-04-14                        53             3
+    Google Ads     2558   2026-01-07                        53             3
+    Google Ads     2740   2026-05-16                        53             3
+    Google Ads     2976   2026-06-10                        53             3
+    Google Ads     2967   2026-01-04                        53             3
+    Google Ads     2876   2025-10-18                        53             3
+    Google Ads     2860   2026-03-20                        53             3
+    Google Ads     2927   2025-08-29                        53             3
+    Google Ads     2934   2026-05-13                        53             3
+    Google Ads      349   2025-09-02                        53             3
+    Google Ads      333   2026-05-07                        53             3
+    Google Ads      289   2026-05-07                        53             3
+    Google Ads      347   2026-02-20                        53             3
+    Google Ads      290   2026-06-12                        53             3
+    Google Ads      508   2025-12-18                        53             3
+    Google Ads      528   2025-12-09                        53             3
+    Google Ads      528   2026-05-19                        53             3
+    Google Ads      459   2026-04-13                        53             3
+    Google Ads      412   2026-02-07                        53             3
+    Google Ads      407   2026-03-05                        53             3
+    Google Ads      468   2026-03-30                        53             3
+    Google Ads      394   2026-04-23                        53             3
+    Google Ads      528   2026-05-28                        53             3
+    Google Ads       47   2026-06-01                        53             3
+    Google Ads      154   2025-10-24                        53             3
+    Google Ads      154   2026-06-21                        53             3
+    Google Ads      184   2026-05-13                        53             3
+    Google Ads      154   2026-04-07                        53             3
+    Google Ads       47   2026-03-30                        53             3
+    Google Ads     1181   2025-12-10                        53             3
+    Google Ads     1125   2026-01-09                        53             3
+    Google Ads     1191   2026-05-21                        53             3
+    Google Ads     1219   2026-06-27                        53             3
+    Google Ads     1133   2026-06-09                        53             3
+    Google Ads     1191   2026-01-28                        53             3
+    Google Ads     1191   2025-12-21                        53             3
+    Google Ads      733   2026-03-25                        53             3
+    Google Ads      712   2026-01-11                        53             3
+    Google Ads      927   2025-12-27                        53             3
+    Google Ads      927   2025-10-16                        53             3
+    Google Ads      900   2026-05-28                        53             3
+    Google Ads      900   2026-01-15                        53             3
+    Google Ads     1040   2026-01-01                        53             3
+    Google Ads      699   2026-02-21                        53             3
+    Google Ads      684   2026-03-05                        53             3
+    Google Ads      545   2026-02-06                        53             3
+    Google Ads      684   2025-10-17                        53             3
+    Google Ads     1449   2026-01-01                        53             3
+    Google Ads     1772   2026-01-25                        53             3
+    Google Ads     1774   2026-03-27                        53             3
+    Google Ads     1774   2026-04-11                        53             3
+    Google Ads     1933   2026-02-19                        53             3
+    Google Ads     1772   2025-12-25                        53             3
+    Google Ads     1843   2025-07-25                        53             3
+    Google Ads     1765   2025-10-23                        53             3
+    Google Ads     1766   2026-03-07                        53             3
+    Google Ads     1894   2026-06-09                        53             3
+    Google Ads     1595   2026-04-27                        53             3
+    Google Ads     1643   2026-04-25                        53             3
+    Google Ads     1690   2026-02-11                        53             3
+    Google Ads     1643   2026-06-12                        53             3
+    Google Ads     1611   2025-11-17                        53             3
+    Google Ads     1267   2026-05-07                        53             3
+    Google Ads     1259   2026-06-08                        53             3
+    Google Ads     1267   2026-05-13                        53             3
+    Google Ads     2406   2025-10-14                        53             3
+    Google Ads     2351   2026-01-21                        53             3
+    Google Ads     2446   2026-05-02                        53             3
+    Google Ads     2446   2026-06-14                        53             3
+    Google Ads     2244   2025-11-25                        53             3
+    Google Ads     2151   2026-04-06                        53             3
+    Google Ads     2244   2026-03-19                        53             3
+    Google Ads     2227   2026-03-02                        53             3
+    Google Ads     2151   2026-03-18                        53             3
+    Google Ads     2270   2026-06-16                        53             3
+    Google Ads     2015   2026-01-02                        53             3
+    Google Ads     2014   2026-04-07                        53             3
+    Google Ads     2068   2026-06-22                        53             3
+      LinkedIn       20   2026-06-13                        55             1
+      LinkedIn      421   2026-04-06                        55             1
+      LinkedIn      914   2026-05-02                        55             1
+      LinkedIn      538   2026-05-01                        55             1
+      LinkedIn      569   2026-06-17                        55             1
+      LinkedIn     1982   2026-03-27                        55             1
+      LinkedIn     2267   2026-06-13                        55             1
+      LinkedIn     2149   2026-06-28                        55             1
+      LinkedIn     1249   2026-04-05                        55             1
+      LinkedIn     1889   2025-09-13                        55             1
+      LinkedIn     1889   2026-03-17                        55             1
+      LinkedIn     1616   2025-10-14                        55             1
+      LinkedIn     1734   2026-05-07                        55             1
+      LinkedIn     2748   2026-05-12                        55             1
+      LinkedIn     2774   2026-05-31                        54             2
+      LinkedIn     2906   2025-12-03                        54             2
+      LinkedIn     2845   2026-04-26                        54             2
+      LinkedIn     2898   2026-04-02                        54             2
+      LinkedIn     2531   2025-12-31                        54             2
+      LinkedIn     2477   2026-03-26                        54             2
+      LinkedIn     2602   2025-10-14                        54             2
+      LinkedIn      652   2026-04-12                        54             2
+      LinkedIn      569   2026-05-28                        54             2
+      LinkedIn      685   2025-09-04                        54             2
+      LinkedIn      685   2026-03-29                        54             2
+      LinkedIn      612   2025-12-21                        54             2
+      LinkedIn      641   2026-05-31                        54             2
+      LinkedIn      662   2026-06-26                        54             2
+      LinkedIn      685   2026-05-29                        54             2
+      LinkedIn      685   2025-10-02                        54             2
+      LinkedIn      549   2026-06-20                        54             2
+      LinkedIn      694   2026-02-21                        54             2
+      LinkedIn      685   2026-01-28                        54             2
+      LinkedIn      541   2026-03-27                        54             2
+      LinkedIn      329   2026-06-21                        54             2
+      LinkedIn      370   2025-12-05                        54             2
+      LinkedIn      279   2025-09-23                        54             2
+      LinkedIn     1179   2026-06-20                        54             2
+      LinkedIn     1100   2026-06-25                        54             2
+      LinkedIn      828   2025-12-08                        54             2
+      LinkedIn      870   2026-05-06                        54             2
+      LinkedIn      783   2025-12-04                        54             2
+      LinkedIn      972   2025-11-11                        54             2
+      LinkedIn     1030   2026-03-04                        54             2
+      LinkedIn      170   2026-03-22                        54             2
+      LinkedIn      190   2026-06-17                        54             2
+      LinkedIn      179   2025-12-04                        54             2
+      LinkedIn      420   2026-06-26                        54             2
+      LinkedIn      489   2026-06-23                        54             2
+      LinkedIn     1616   2026-02-14                        54             2
+      LinkedIn     1698   2026-06-15                        54             2
+      LinkedIn     1698   2026-04-17                        54             2
+      LinkedIn     1684   2025-11-23                        54             2
+      LinkedIn     1734   2026-04-14                        54             2
+      LinkedIn     2142   2025-09-04                        54             2
+      LinkedIn     2267   2026-05-02                        54             2
+      LinkedIn     2129   2026-04-07                        54             2
+      LinkedIn     2258   2026-05-28                        54             2
+      LinkedIn     2305   2025-11-29                        54             2
+      LinkedIn     2439   2026-04-07                        54             2
+      LinkedIn     2022   2026-05-07                        54             2
+      LinkedIn     2053   2026-04-05                        54             2
+      LinkedIn     1263   2025-10-05                        54             2
+      LinkedIn     1327   2026-04-21                        54             2
+      LinkedIn     1290   2026-03-27                        53             3
+      LinkedIn     1327   2026-02-28                        53             3
+      LinkedIn     1257   2026-02-21                        53             3
+      LinkedIn     1366   2026-04-28                        53             3
+      LinkedIn     1734   2026-05-30                        53             3
+      LinkedIn     1642   2026-03-28                        53             3
+      LinkedIn     1614   2026-02-12                        53             3
+      LinkedIn     1642   2025-09-16                        53             3
+      LinkedIn     2291   2026-01-22                        53             3
+      LinkedIn     2291   2025-12-31                        53             3
+      LinkedIn     2188   2026-02-27                        53             3
+      LinkedIn     2158   2026-05-04                        53             3
+      LinkedIn     2129   2025-11-21                        53             3
+      LinkedIn     2279   2025-08-12                        53             3
+      LinkedIn     2158   2025-10-09                        53             3
+      LinkedIn     2267   2026-05-14                        53             3
+      LinkedIn     2258   2026-02-21                        53             3
+      LinkedIn     2011   2025-12-30                        53             3
+      LinkedIn     1983   2025-11-11                        53             3
+      LinkedIn     1889   2026-04-09                        53             3
+      LinkedIn     1789   2026-04-28                        53             3
+      LinkedIn     1910   2025-08-04                        53             3
+      LinkedIn     1789   2026-01-04                        53             3
+      LinkedIn     1507   2025-09-17                        53             3
+      LinkedIn     1573   2025-12-18                        53             3
+      LinkedIn     1498   2026-04-23                        53             3
+      LinkedIn     2477   2026-03-16                        53             3
+      LinkedIn     2587   2026-06-21                        53             3
+      LinkedIn     2602   2025-10-24                        53             3
+      LinkedIn     2521   2026-02-21                        53             3
+      LinkedIn     2807   2025-11-15                        53             3
+      LinkedIn     2716   2026-02-06                        53             3
+      LinkedIn     2676   2026-06-24                        53             3
+      LinkedIn     2660   2026-03-23                        53             3
+      LinkedIn     2664   2026-01-14                        53             3
+      LinkedIn     2839   2026-03-13                        53             3
+      LinkedIn     2845   2026-04-12                        53             3
+      LinkedIn     2906   2025-11-04                        53             3
+      LinkedIn     2900   2026-05-15                        53             3
+      LinkedIn      489   2026-05-12                        53             3
+      LinkedIn      500   2026-02-14                        53             3
+      LinkedIn      489   2026-02-27                        53             3
+      LinkedIn      500   2025-10-11                        53             3
+      LinkedIn      489   2025-12-26                        53             3
+      LinkedIn      514   2026-06-17                        53             3
+      LinkedIn      420   2026-02-19                        53             3
+      LinkedIn     1236   2025-11-26                        53             3
+      LinkedIn     1146   2025-09-16                        53             3
+      LinkedIn      641   2026-04-28                        53             3
+      LinkedIn      649   2025-11-03                        53             3
+      LinkedIn      649   2026-02-28                        53             3
+      LinkedIn      546   2026-05-20                        53             3
+      LinkedIn      653   2026-03-31                        53             3
+      LinkedIn      574   2026-03-17                        53             3
+      LinkedIn      549   2026-05-03                        53             3
+      LinkedIn      271   2026-03-24                        53             3
+      LinkedIn      125   2026-03-10                        53             3
+      LinkedIn       11   2025-11-30                        53             3
+      LinkedIn      179   2026-04-11                        53             3
+      LinkedIn       87   2026-03-09                        53             3
+      LinkedIn       20   2026-05-17                        53             3
+      LinkedIn      125   2026-06-06                        53             3
+      LinkedIn      875   2026-03-05                        53             3
+      LinkedIn      808   2026-06-20                        53             3
+      LinkedIn      787   2026-05-24                        53             3
+      LinkedIn      911   2026-03-29                        53             3
+      LinkedIn      917   2026-05-28                        53             3
+      LinkedIn      912   2026-05-11                        53             3
+Organic Search     1535   2025-12-17                        55             1
+Organic Search     1489   2026-05-27                        55             1
+Organic Search     1489   2026-05-08                        55             1
+Organic Search     1819   2026-03-17                        55             1
+Organic Search     2007   2026-03-01                        55             1
+Organic Search     2116   2026-01-27                        55             1
+Organic Search     2069   2026-05-18                        55             1
+Organic Search     2200   2025-11-16                        55             1
+Organic Search     2200   2026-01-24                        55             1
+Organic Search     2187   2025-10-23                        55             1
+Organic Search     2187   2026-04-17                        55             1
+Organic Search     1652   2026-05-16                        55             1
+Organic Search     1313   2025-11-28                        55             1
+Organic Search     2419   2026-06-01                        55             1
+Organic Search     2352   2026-04-16                        55             1
+Organic Search     2314   2025-12-13                        55             1
+Organic Search     2811   2025-12-23                        55             1
+Organic Search     2811   2026-03-04                        55             1
+Organic Search     2644   2026-03-04                        55             1
+Organic Search     2644   2026-06-16                        55             1
+Organic Search     2647   2026-05-29                        55             1
+Organic Search     2497   2026-03-02                        55             1
+Organic Search     2532   2026-04-20                        55             1
+Organic Search      477   2026-06-08                        55             1
+Organic Search      384   2026-01-23                        55             1
+Organic Search      463   2026-01-03                        55             1
+Organic Search      532   2026-06-18                        55             1
+Organic Search      328   2026-01-08                        55             1
+Organic Search      328   2026-03-08                        55             1
+Organic Search      151   2025-12-16                        55             1
+Organic Search       77   2026-05-17                        55             1
+Organic Search     1231   2026-06-09                        55             1
+Organic Search     1150   2025-08-24                        55             1
+Organic Search      548   2026-02-20                        55             1
+Organic Search      668   2026-05-18                        55             1
+Organic Search      798   2026-05-12                        55             1
+Organic Search      781   2026-06-30                        55             1
+Organic Search      794   2026-04-13                        55             1
+Organic Search      837   2026-04-14                        55             1
+Organic Search      764   2026-02-17                        55             1
+Organic Search      929   2026-06-09                        55             1
+Organic Search      929   2026-03-25                        55             1
+Organic Search     1054   2026-04-26                        55             1
+Organic Search     1054   2026-04-12                        54             2
+Organic Search     1066   2026-02-02                        54             2
+Organic Search      890   2026-01-21                        54             2
+Organic Search     1066   2026-04-06                        54             2
+Organic Search      975   2026-05-06                        54             2
+Organic Search      896   2026-05-21                        54             2
+Organic Search      975   2026-06-23                        54             2
+Organic Search      191   2026-04-30                        54             2
+Organic Search      155   2025-12-10                        54             2
+Organic Search        5   2026-03-05                        54             2
+Organic Search      151   2025-09-24                        54             2
+Organic Search       64   2026-04-16                        54             2
+Organic Search      414   2026-02-14                        54             2
+Organic Search      504   2025-12-24                        54             2
+Organic Search      414   2026-05-14                        54             2
+Organic Search      463   2026-05-26                        54             2
+Organic Search      532   2026-03-08                        54             2
+Organic Search      532   2026-04-09                        54             2
+Organic Search      411   2026-05-04                        54             2
+Organic Search      230   2026-05-15                        54             2
+Organic Search      313   2026-05-08                        54             2
+Organic Search      212   2025-09-19                        54             2
+Organic Search      794   2026-05-17                        54             2
+Organic Search      798   2025-11-03                        54             2
+Organic Search      798   2025-12-19                        54             2
+Organic Search      760   2026-04-07                        54             2
+Organic Search      708   2025-11-26                        54             2
+Organic Search     1150   2025-12-14                        54             2
+Organic Search     1186   2025-07-29                        54             2
+Organic Search     1193   2026-05-22                        54             2
+Organic Search     1234   2026-03-20                        54             2
+Organic Search      557   2026-06-24                        54             2
+Organic Search      603   2025-09-10                        54             2
+Organic Search     2375   2026-02-13                        54             2
+Organic Search     2352   2025-11-23                        54             2
+Organic Search     2399   2026-06-09                        54             2
+Organic Search     2352   2025-12-24                        54             2
+Organic Search     2302   2025-10-12                        54             2
+Organic Search     2352   2025-12-15                        54             2
+Organic Search     1519   2026-04-04                        54             2
+Organic Search     1452   2025-09-20                        54             2
+Organic Search     1543   2026-04-24                        54             2
+Organic Search     1561   2026-01-19                        54             2
+Organic Search     1501   2026-02-01                        54             2
+Organic Search     1851   2026-05-16                        54             2
+Organic Search     1851   2026-06-01                        54             2
+Organic Search     1389   2026-03-30                        54             2
+Organic Search     1373   2025-10-29                        54             2
+Organic Search     1350   2026-02-26                        54             2
+Organic Search     1330   2026-05-16                        54             2
+Organic Search     2214   2026-03-18                        54             2
+Organic Search     2290   2025-11-23                        54             2
+Organic Search     2252   2026-02-01                        54             2
+Organic Search     2273   2026-01-29                        54             2
+Organic Search     1735   2026-05-06                        54             2
+Organic Search     1694   2025-10-17                        54             2
+Organic Search     1667   2026-05-01                        54             2
+Organic Search     1682   2026-04-27                        54             2
+Organic Search     1694   2025-11-02                        54             2
+Organic Search     1685   2025-09-15                        54             2
+Organic Search     1646   2026-06-29                        54             2
+Organic Search     2506   2026-05-06                        54             2
+Organic Search     2483   2026-05-22                        54             2
+Organic Search     2524   2025-07-22                        54             2
+Organic Search     2625   2025-11-03                        54             2
+Organic Search     2527   2026-04-06                        54             2
+Organic Search     2483   2026-02-12                        54             2
+Organic Search     2623   2026-02-19                        54             2
+Organic Search     2628   2025-10-31                        54             2
+Organic Search     2971   2025-10-22                        54             2
+Organic Search     2973   2025-11-27                        54             2
+Organic Search     2908   2026-05-10                        54             2
+Organic Search     2794   2026-04-14                        54             2
+Organic Search     2682   2025-10-26                        54             2
+Organic Search     2646   2026-05-06                        54             2
+Organic Search     2722   2026-02-03                        53             3
+Organic Search     2794   2026-03-09                        53             3
+Organic Search     2729   2026-04-27                        53             3
+Organic Search     2698   2026-01-01                        53             3
+Organic Search     2805   2026-02-11                        53             3
+Organic Search     2791   2026-05-07                        53             3
+Organic Search     2791   2026-06-19                        53             3
+Organic Search     2805   2025-12-16                        53             3
+Organic Search     2644   2026-04-19                        53             3
+Organic Search     2749   2026-04-26                        53             3
+Organic Search     2506   2026-06-29                        53             3
+Organic Search     2606   2026-03-24                        53             3
+Organic Search     2606   2025-09-18                        53             3
+Organic Search     2912   2025-12-31                        53             3
+Organic Search     2861   2025-08-20                        53             3
+Organic Search      633   2026-04-04                        53             3
+Organic Search      672   2026-01-17                        53             3
+Organic Search      504   2026-03-04                        53             3
+Organic Search      438   2025-12-27                        53             3
+Organic Search      515   2025-10-11                        53             3
+Organic Search      450   2026-04-11                        53             3
+Organic Search     1031   2026-05-19                        53             3
+Organic Search     1052   2025-10-11                        53             3
+Organic Search      946   2026-05-13                        53             3
+Organic Search      920   2025-10-30                        53             3
+Organic Search      929   2025-09-30                        53             3
+Organic Search      957   2025-10-20                        53             3
+Organic Search      957   2025-10-12                        53             3
+Organic Search      196   2025-08-21                        53             3
+Organic Search       45   2026-04-25                        53             3
+Organic Search       64   2026-05-03                        53             3
+Organic Search     1224   2026-05-02                        53             3
+Organic Search     1090   2026-04-05                        53             3
+Organic Search     1193   2026-01-29                        53             3
+Organic Search     1078   2026-06-15                        53             3
+Organic Search     1234   2026-06-05                        53             3
+Organic Search     1132   2026-01-31                        53             3
+Organic Search      363   2026-04-20                        53             3
+Organic Search      278   2025-09-26                        53             3
+Organic Search      364   2025-08-19                        53             3
+Organic Search      299   2026-06-29                        53             3
+Organic Search      218   2026-06-26                        53             3
+Organic Search      304   2026-01-14                        53             3
+Organic Search      217   2026-04-10                        53             3
+Organic Search      344   2026-06-15                        53             3
+Organic Search      866   2026-04-28                        53             3
+Organic Search      854   2026-03-19                        53             3
+Organic Search      866   2026-02-26                        53             3
+Organic Search      708   2026-04-23                        53             3
+Organic Search      815   2026-06-08                        53             3
+Organic Search      837   2026-06-25                        53             3
+Organic Search      798   2025-10-23                        53             3
+Organic Search      708   2026-03-22                        53             3
+Organic Search      837   2026-04-19                        53             3
+Organic Search     1741   2026-02-28                        53             3
+Organic Search     1613   2026-05-26                        53             3
+Organic Search     1652   2025-12-12                        53             3
+Organic Search     1757   2026-06-07                        53             3
+Organic Search     1682   2026-03-06                        53             3
+Organic Search     1732   2025-09-23                        53             3
+Organic Search     1664   2026-02-06                        53             3
+Organic Search     1694   2026-04-10                        53             3
+Organic Search     1647   2026-06-15                        53             3
+Organic Search     1646   2025-12-29                        53             3
+Organic Search     1610   2025-12-17                        53             3
+Organic Search     1735   2026-05-03                        53             3
+Organic Search     1667   2025-10-06                        53             3
+Organic Search     1542   2026-04-22                        53             3
+Organic Search     1448   2025-11-01                        53             3
+Organic Search     1543   2025-11-08                        53             3
+Organic Search     1454   2025-11-30                        53             3
+Organic Search     1542   2026-05-04                        53             3
+Organic Search     2069   2026-02-18                        53             3
+Organic Search     1999   2025-12-03                        53             3
+Organic Search     1971   2025-11-22                        53             3
+Organic Search     2115   2026-06-15                        53             3
+Organic Search     1973   2026-01-29                        53             3
+Organic Search     2116   2026-01-21                        53             3
+Organic Search     2069   2026-03-20                        53             3
+Organic Search     2302   2026-01-21                        53             3
+Organic Search     2302   2025-11-14                        53             3
+Organic Search     2365   2025-11-09                        53             3
+Organic Search     2307   2025-12-19                        53             3
+Organic Search     2375   2025-11-28                        53             3
+Organic Search     2307   2025-12-23                        53             3
+Organic Search     2187   2025-11-28                        53             3
+Organic Search     2295   2026-02-20                        53             3
+Organic Search     2273   2026-03-27                        53             3
+Organic Search     2273   2026-02-14                        53             3
+Organic Search     2247   2026-06-03                        53             3
+Organic Search     2247   2026-03-28                        53             3
+Organic Search     2295   2026-02-16                        53             3
+Organic Search     2280   2025-08-28                        53             3
+Organic Search     2286   2026-01-05                        53             3
+Organic Search     1943   2026-06-24                        53             3
+Organic Search     1851   2026-02-03                        53             3
+Organic Search     1810   2026-01-10                        53             3
+Organic Search     1785   2026-03-27                        53             3
+Organic Search     1934   2026-03-15                        53             3
+Organic Search     1934   2025-12-30                        53             3
+Organic Search     1851   2026-04-23                        53             3
+Organic Search     1313   2025-12-08                        53             3
+Organic Search     1381   2026-03-13                        53             3
+Organic Search     1365   2026-06-30                        53             3
+Organic Search     1350   2026-05-07                        53             3
+Organic Search     1273   2026-06-05                        53             3
+      Referral        9   2025-12-29                        55             1
+      Referral        9   2026-02-17                        55             1
+      Referral      493   2026-03-21                        55             1
+      Referral      443   2025-11-17                        55             1
+      Referral      568   2025-12-13                        55             1
+      Referral     1761   2025-12-31                        55             1
+      Referral     2100   2026-01-18                        55             1
+      Referral     1478   2026-01-08                        55             1
+      Referral     1578   2025-12-01                        55             1
+      Referral     1375   2026-05-22                        55             1
+      Referral     1325   2025-12-25                        55             1
+      Referral     1331   2025-11-30                        54             2
+      Referral     2416   2026-03-25                        54             2
+      Referral     1585   2026-01-14                        54             2
+      Referral     2196   2025-08-13                        54             2
+      Referral     2255   2026-01-10                        54             2
+      Referral     2103   2026-05-04                        54             2
+      Referral      619   2026-05-25                        54             2
+      Referral      619   2025-11-18                        54             2
+      Referral      582   2026-05-27                        54             2
+      Referral      592   2026-05-19                        54             2
+      Referral      568   2025-12-21                        54             2
+      Referral      554   2026-06-04                        54             2
+      Referral       31   2025-09-29                        54             2
+      Referral      903   2026-02-19                        54             2
+      Referral      903   2026-02-05                        54             2
+      Referral     1168   2025-12-31                        54             2
+      Referral     1200   2025-10-02                        54             2
+      Referral     1226   2026-03-25                        54             2
+      Referral     1168   2026-04-07                        54             2
+      Referral      492   2026-06-30                        54             2
+      Referral      493   2025-11-06                        54             2
+      Referral      219   2026-03-05                        54             2
+      Referral      351   2026-02-14                        54             2
+      Referral      221   2026-05-27                        54             2
+      Referral      292   2025-08-15                        54             2
+      Referral      725   2026-01-05                        54             2
+      Referral     2631   2026-03-17                        54             2
+      Referral     2597   2025-12-04                        54             2
+      Referral     2986   2026-01-04                        54             2
+      Referral     2986   2026-04-18                        53             3
+      Referral     2631   2025-12-05                        53             3
+      Referral     2597   2025-12-06                        53             3
+      Referral     2586   2026-05-01                        53             3
+      Referral     2733   2026-01-17                        53             3
+      Referral     2923   2025-11-10                        53             3
+      Referral     2880   2026-03-05                        53             3
+      Referral     2103   2026-01-23                        53             3
+      Referral     2103   2025-11-11                        53             3
+      Referral     2103   2025-08-09                        53             3
+      Referral     1323   2026-01-15                        53             3
+      Referral     1908   2025-12-11                        53             3
+      Referral     2202   2026-03-05                        53             3
+      Referral     2138   2026-05-09                        53             3
+      Referral     2196   2025-10-20                        53             3
+      Referral     2189   2026-02-27                        53             3
+      Referral     2416   2026-03-15                        53             3
+      Referral     1578   2026-02-23                        53             3
+      Referral     1538   2025-12-31                        53             3
+      Referral      785   2026-02-16                        53             3
+      Referral      725   2026-03-05                        53             3
+      Referral      725   2026-01-04                        53             3
+      Referral     1010   2026-04-23                        53             3
+      Referral     1010   2026-05-14                        53             3
+      Referral      698   2026-04-06                        53             3
+      Referral      577   2025-12-11                        53             3
+      Referral       31   2026-01-19                        53             3
+      Referral       31   2026-01-05                        53             3
+      Referral       39   2026-01-13                        53             3
+      Referral        9   2026-02-07                        53             3
+      Referral       22   2026-03-20                        53             3
+      Referral       37   2026-02-23                        53             3
+      Referral      267   2025-10-29                        53             3
+      Referral      266   2026-03-26                        53             3
+      Referral      352   2026-01-25                        53             3
+      Referral      253   2026-02-16                        53             3
+      Referral     1226   2026-05-05                        53             3
+      Referral      465   2025-11-12                        53             3
+      Referral      493   2025-10-27                        53             3
+      Referral      443   2025-12-28                        53             3
+
+=========================================================================
+
+--- Query 28: SQL Execution ---
+SQL:
+SELECT 
+    u.user_id,
+    s.plan_type,
+    u.country,
+    u.signup_channel,
+    SUM(t.amount) AS total_spend_to_date
+FROM users u
+JOIN subscriptions s ON u.user_id = s.user_id
+JOIN transactions t ON u.user_id = t.user_id
+WHERE t.status = 'Success' AND s.status = 'Active'
+GROUP BY u.user_id, s.plan_type, u.country, u.signup_channel
+ORDER BY total_spend_to_date DESC
+LIMIT 10;
+
+Results:
+ user_id  plan_type        country signup_channel  total_spend_to_date
+    1530 Enterprise        Germany       LinkedIn               2587.0
+    1430 Enterprise         Canada       LinkedIn               2388.0
+    2219 Enterprise United Kingdom       Referral               2388.0
+     279 Enterprise        Germany       LinkedIn               2388.0
+     463 Enterprise United Kingdom Organic Search               2388.0
+    1411 Enterprise         Canada       Referral               2388.0
+    2279 Enterprise         France       LinkedIn               2388.0
+    1223 Enterprise United Kingdom Organic Search               2388.0
+     668 Enterprise        Germany Organic Search               2388.0
+    2046 Enterprise        Germany       LinkedIn               2388.0
+
+=========================================================================
+
+--- Query 29: SQL Execution ---
+SQL:
+SELECT 
+    CASE 
+        WHEN age < 25 THEN 'Under 25'
+        WHEN age BETWEEN 25 AND 35 THEN '25-35'
+        WHEN age BETWEEN 36 AND 50 THEN '36-50'
+        ELSE 'Over 50'
+    END AS age_group,
+    COUNT(u.user_id) AS total_users,
+    SUM(CASE WHEN s.status = 'Churned' THEN 1 ELSE 0 END) AS churned_users,
+    ROUND(SUM(CASE WHEN s.status = 'Churned' THEN 1 ELSE 0 END) * 100.0 / COUNT(u.user_id), 2) AS churn_rate_pct
+FROM users u
+JOIN subscriptions s ON u.user_id = s.user_id
+GROUP BY age_group
+ORDER BY age_group;
+
+Results:
+age_group  total_users  churned_users  churn_rate_pct
+    25-35          676          298.0           44.08
+    36-50          961          452.0           47.03
+  Over 50          930          426.0           45.81
+ Under 25          433          176.0           40.65
+
+=========================================================================
+
+--- Query 30: SQL Execution ---
+SQL:
+SELECT 
+    st.satisfaction_score,
+    COUNT(DISTINCT u.user_id) AS customer_count,
+    SUM(CASE WHEN s.status = 'Churned' THEN 1 ELSE 0 END) AS churned_count,
+    ROUND(SUM(CASE WHEN s.status = 'Churned' THEN 1 ELSE 0 END) * 100.0 / COUNT(DISTINCT u.user_id), 2) AS churn_rate_pct
+FROM support_tickets st
+JOIN users u ON st.user_id = u.user_id
+JOIN subscriptions s ON u.user_id = s.user_id
+WHERE st.satisfaction_score IS NOT NULL
+GROUP BY st.satisfaction_score
+ORDER BY st.satisfaction_score DESC;
+
+Results:
+ satisfaction_score  customer_count  churned_count  churn_rate_pct
+                  5             248          176.0           70.97
+                  4             381          283.0           74.28
+                  3             259          227.0           87.64
+                  2             262          280.0          106.87
+                  1             340          483.0          142.06
+
+=========================================================================
+

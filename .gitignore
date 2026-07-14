@@ -1,0 +1,12 @@
+# Python bytecode caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local environment variables
+.env
+.env.local
+
+# Streamlit local configuration
+.streamlit/
